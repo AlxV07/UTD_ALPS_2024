@@ -1,15 +1,33 @@
 % ======= Wordle Application =======
 
-% Process:
-% Not-written-yet ;P
+% This solver's process for determining a word:
+% Start with a massive word set.
+% Arbitrarly pick a word as a guess from the candidate set.
+% Determine "feedback" from the guess:
+%  - which letters in the guess are correct
+%  - which letters in the guess are in the wrong position
+%  - which letters in the guess are not included
+% From this feedback, build constraints to apply to the candidate set:
+%  - "A" constraint: list of known correct letters in their respective positions, 0 if letter pos is not known.
+%    E.x. [c,0,0,n,e]
+%  - "B" constraint: a list of all the known letters in the word which must be used in the guess.
+%    E.x. [c,n,e,r]
+%  - "C" constraint: a list of lists of letters which are known not to be at a pos.
+%    E.x. [[p], [p], [o, p], [d, p], [p]]
+% Using these constraints, eliminate candidates from candidate set which do not satisfy.
+% Repeat until out of guesses, candidate set is expired, or solution is found.
+		
+% === HELP ===
+% This wordle solver has two modes: "auto.", and "manual."
+% *Note the periods at the end of text in quotes. When entering input into this solver, a period must always end the query.
+% = "auto." mode: =
+% The user will enter a word into the solver and the solver will print out on a new line each guess which was used in attempt to determine the word (if not determined, it will also print so after the guesses).
+% = "manual." mode: 
+% The user will pick a word and the solver will try to guess it in six guesses.  Each guess, the user will give "feedback" on the guessed word: what letters are correct, what are in the wrong positions, what are not included, etc. Choose the "manual." mode for more details on entering feedback.
+% === END OF HELP ===
+
 
 % === Util Methods ===
-
-% Joins lists `A` and `B`, producing `C`
-% `join(A, B, C).
-join([], L, L).
-join([H|T], L, [H|R]) :- join(T, L, R).
-
 
 % Returns if `X` is in a list `Y`:
 %`in(X, Y)`
@@ -36,21 +54,32 @@ add_all_to_all(X, [], X).
 add_all_to_all(H, [H2|T2], X) :- 
 	add_to_all(H, H2, X1), add_all_to_all(X1, T2, X).
 
+
+% Adds `B` to the front of all lists in `A`, producing `C`.
+% `add_to_all(A, B, C).`
 add_to_all([], _, []).
 add_to_all([H|T], X, [[X|H]|P]) :- add_to_all(T, X, P).
 
-% Convert list `A` into a set `B`
-% `set(A, B)`
-set([], []).
-set([H|T], B) :- set(T, B), in(H, B).  % If `H` is already in set: don't add
-set([H|T], [H|B]) :- set(T, B).  % Else: add and continue
 
+% Concats elements of a list `L` into an atom `R`
+% `concat_list(L, R).`
+concat_list([A], A).
+concat_list([A|B], R) :- concat_list(B, R1), atom_concat(A, R1, R).
+
+
+% Prints all elements in a list `L` on a new line, enumerated e.x. ith-element `E` -> `i: E`.
+% `enum_print_all(L)`.
+enum_print_all(L) :- enum_print_all_h(L, 1).
+enum_print_all_h([], _).
+enum_print_all_h([H|T], I) :- write(I), write(': '), write(H), nl, I1 is I + 1, enum_print_all_h(T, I1).
 
 % === ===
 
-letters([a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z]).
+
+% === Word Set Gen ===
 
 % Read the word list in `./words.txt` into a list `R`.
+% Does not backtrack.
 % `words(R).`
 words(R) :-
 	open('./words.txt', read, Str),
@@ -65,24 +94,30 @@ read_file(Stream,[WORD|L]) :-
 	atom_chars(X, WORD),
   read_file(Stream, L).
 
+% === ===
 	
+
+% === Feedback Gen === 
+
 % Produces the `FEEDBACK` list from the given `GUESS` on the target word `TAR`
-% Info key: 0=not-in, 1=wrong-pos, 2=correct
+% Info key: n=not-in, i=in,wrong-pos, c=correct
 % `gen_feedback(TAR, GUESS, FEEDBACK).`
 gen_feedback(T, G, F) :- 
 	gen_feedback_h_exacts(T, G, E, L),
 	gen_feedback_h_others(T, G, O, L),
 	gen_feedback_h_merge_e_o(E, O, F).
 
+% Produces a partial `FEEDBACK` list containing only `c` desginators.
 % `gen_feedback_h_exacts(TAR, GUESS, FEEDBACK, REMAINING_LETTERS).`
 gen_feedback_h_exacts([], [], [], []).
 gen_feedback_h_exacts([T_H|T_T], [G_H|G_T], [F1|F2], L) :-
 	(T_H == G_H ->
-		F1 = 2, L = L2;
-		F1 = 0,	L = [T_H|L2]
+		F1 = c, L = L2;
+		F1 = n,	L = [T_H|L2]
 	),
 	gen_feedback_h_exacts(T_T, G_T, F2, L2).
 
+% Produces a partial `FEEDBACK` list containing only `i` desginators.
 % `gen_feedback_h_others(TAR, GUESS, FEEDBACK, REMAINING_LETTERS).`
 gen_feedback_h_others([], [], [], _).
 gen_feedback_h_others([T_H|T_T], [G_H|G_T], [F1|F2], L) :-
@@ -91,78 +126,89 @@ gen_feedback_h_others([T_H|T_T], [G_H|G_T], [F1|F2], L) :-
 	T_H \== G_H,
 	(in(G_H, L) -> 
 		del(G_H, L, L1),!,
-		F1 = 1,
+		F1 = i,
 		gen_feedback_h_others(T_T, G_T, F2, L1);
-		F1 = 0,
+		F1 = n,
 		gen_feedback_h_others(T_T, G_T, F2, L)
 	).
 
+% Merges `EXACTS`, and `OTHERS`, partial feedback lists into the final `FEEDBACK`
+% `gen_feedback_h_merge_e_o(EXACTS, OTHERS, FEEDBACK).`
 gen_feedback_h_merge_e_o([], [], []).
 gen_feedback_h_merge_e_o([E_H|E_T], [O_H|O_T], [F1|F2]) :-
-	(E_H == 2 -> F1 = 2;
-	(O_H == 1 -> F1 = 1; F1 = 0)),
+	(E_H == c -> F1 = c;
+	(O_H == i -> F1 = i; 
+	F1 = n)),
 	gen_feedback_h_merge_e_o(E_T, O_T, F2).
 
-
-% TODO: CONSTRAINTS TO ELIMINATE MORE CHARS PER SPOTS
-
-% Produces the `A` constraint from a `GUESS` and its `FEEDBACK`
-% 
-gen_A_constraints([], [], []).
-gen_A_constraints([G_H|G_T], [F_H|F_T], [A|L]) :-
-	(F_H == 2 -> A = G_H; A = 0),
-	gen_A_constraints(G_T, F_T, L).
+% === ===
 
 
-% Produces the `B` constraint from a `GUESS` and its `FEEDBACK`
-% 
-gen_B_constraints([], [], []).
-gen_B_constraints([G_H|G_T], [F_H|F_T], B) :- 
-	(F_H \== 0 -> B = [G_H|L]; B = L),
-	gen_B_constraints(G_T, F_T, L).
-
-
-% Produces the `C` constraint from a `GUESS` and its `FEEDBACK`
-% 
-gen_C_constraints(G, F, C) :- 
-	singular_non_contained(G, F, S),
-	global_non_contained(G, F, L),
-	add_all_to_all(S, L, C).
-singular_non_contained([], [], []).
-singular_non_contained([G_H|G_T], [F_H|F_T], S) :-
-	(F_H == 1 -> S = [[G_H]|L]; S = [[]|L]),
-	singular_non_contained(G_T, F_T, L).
-global_non_contained([], [], []).
-global_non_contained([G_H|G_T], [F_H|F_T], G) :-
-	(F_H == 0 -> G = [G_H|L]; G = L),
-	global_non_contained(G_T, F_T, L).
-
+% === Constraint Gen ===
 
 % Produces the constraint sets `A`, `B`, and `C` for a given `GUESS`  and `FEEDBACK`
 % Constraints key: A=CORRECT, B=CONTAINED, C=NOT_CONTAINED
 % `gen_constraints(GUESS, FEEDBACK, A, B, C).`
-% Constraint Explanation: Not written yet 
 gen_constraints([], [], [], [], []).
 gen_constraints(G, F, A, B, C) :-
 	gen_A_constraints(G, F, A),  % Exacts that are known
 	gen_B_constraints(G, F, B),  % All letters which are in word
 	gen_C_constraints(G, F, C).  % For each pos, the letters it CAN'T be
 
+% Produces the `A` constraint from a `GUESS` and its `FEEDBACK`
+% `gen_A_constraints(GUESS, FEEDBACK, A)`.
+gen_A_constraints([], [], []).
+gen_A_constraints([G_H|G_T], [F_H|F_T], [A|L]) :-
+	(F_H == c -> A = G_H; A = 0),
+	gen_A_constraints(G_T, F_T, L).
 
-% Produce a `CANDS` list of possible words from OLD_CANDS which match new constraints
-% TODO: `gen_new_cands(...).`
-gen_cands(OLD_CANDS, A, B, C, NEW_CANDS) :-
-	findall(W, matching_word(OLD_CANDS, A, B, C, W), NEW_CANDS).
+% Produces the `B` constraint from a `GUESS` and its `FEEDBACK`
+% `gen_B_constraints(GUESS, FEEDBACK, B)`.
+gen_B_constraints([], [], []).
+gen_B_constraints([G_H|G_T], [F_H|F_T], B) :- 
+	(F_H \== n -> B = [G_H|L]; B = L),
+	gen_B_constraints(G_T, F_T, L).
+
+% Produces the `C` constraint from a `GUESS` and its `FEEDBACK`
+% `gen_C_constraints(GUESS, FEEDBACK, C)`.
+gen_C_constraints(G, F, C) :- 
+	singular_non_contained(G, F, S),
+	global_non_contained(G, F, L),
+	add_all_to_all(S, L, C).
+
+% Produces a list `L`, of singularly non-contained letters i.e. not in the cur pos in the word.
+% `singular_non_contained(GUESS, FEEDBACK, L).`
+singular_non_contained([], [], []).
+singular_non_contained([G_H|G_T], [F_H|F_T], S) :-
+	(F_H == i -> S = [[G_H]|L]; S = [[]|L]),
+	singular_non_contained(G_T, F_T, L).
+
+% Produces a list `L`, of globally non-contained letters i.e. not in any pos in the word.
+% `global_non_contained(GUESS, FEEDBACK, L).`
+global_non_contained([], [], []).
+global_non_contained([G_H|G_T], [F_H|F_T], G) :-
+	(F_H == n -> G = [G_H|L]; G = L),
+	global_non_contained(G_T, F_T, L).
+
+% === ===
 
 
-% Produces a word from the word set `W` which fits constraints `A`, `B`, and `C`
-% `matching_word(W, A, B, C, WORD).`
-matching_word(W, [A1, A2, A3, A4, A5], B0, [C1,C2,C3,C4,C5], R) :- 
-% Change w/ gen_cands to iterate through words and check if each satisfies; if so, add 
-% to next CANDS list (instead of using `findall` and counting dupes)
-	% In word set
-	in([A, B, C, D, E], W),
+% === Guess Gen ===
 
+% Produce a `NEW_CANDS` list of possible words from OLD_CANDS which match new constraints
+% `gen_new_cands(OLD_CANDS, A, B, C, NEW_CANDS).`
+gen_cands([], _, _, _, []).
+gen_cands([O_H|O_T], A, B, C, NEW_CANDS) :-
+	(matching_word(O_H, A, B, C) ->
+		NEW_CANDS = [O_H|N2];
+		NEW_CANDS = N2
+	),
+	gen_cands(O_T, A, B, C, N2).
+
+
+% Returns if a word W matches the constraints `A`, `B`, and `C`.
+% `matching_word(W, A, B, C).`
+matching_word([A,B,C,D,E], [A1, A2, A3, A4, A5], B0, [C1,C2,C3,C4,C5]) :- 
 	% All in contained-chars set is contained
 	del(A, B0, B1),
 	del(B, B1, B2),
@@ -182,33 +228,56 @@ matching_word(W, [A1, A2, A3, A4, A5], B0, [C1,C2,C3,C4,C5], R) :-
 	(not_in(B, C2); B == A2),
 	(not_in(C, C3); C == A3),
 	(not_in(D, C4); D == A4),
-	(not_in(E, C5); E == A5),
-
-	R = [A,B,C,D,E].
+	(not_in(E, C5); E == A5).
 
 
 % Produces a `GUESS` from the `CANDS` list
 % `gen_guess(CANDS, GUESS)`
-gen_guess([], [0,0,0,0,0]).  % Temp
-gen_guess([H|_], H).  % Temp 
+gen_guess([], [0,0,0,0,0]).  % If reaches this, either unfound bug or TAR word not in word set.
+gen_guess([H|_], H).
 
+% === ===
+
+
+% === Wordle Methods ===
 
 % Entrance Method to start wordle solver
-% Note: A stream does not exist error usually means this method was back-tracked to
 wordle :-
 	words(W),
-	write('Enter solver type: (type "auto." or "manual."):'), nl,
-	read(TYPE),
-	(TYPE == auto ->
-		write('"auto" mode selected; enter target word:'), nl,
-		read(TAR_ATOM),
-		atom_chars(TAR_ATOM, TAR),
+	write('Enter solver mode: ("auto." or "manual.", type "help." for help):'), nl,
+	read(MODE),
+	(MODE == auto ->
+		write('=== "auto." mode selected ==='), nl,
+		write('Enter target word e.x. "crane."'), nl,
+		read(TAR_ATOM),	atom_chars(TAR_ATOM, TAR),
 		auto_wordle(W, TAR, G),
-		write(G)
-		;
+		enum_print_all(G);
+	(MODE == manual ->
+		write('=== "manual." mode selected ==='), nl,
+		write('For each guess from the solver, enter feedback in the format:'), nl,
+		write('-Letter is correct? ->                       c'), nl,
+		write('-Letter in word and NOT already marked*? -> i'), nl,
+		write('-Letter is not in word? ->                   n'), nl,
+		write('* i.e. Word="ab", Guess="aa" -> '), nl,
+		write('*      Feedback="cn", not "ci", because first "a" already marked by "c".'), nl, nl,
+		write('e.x. Word="trees",'),
+		write('    Guess="crane" ->'),
+		write(' Feedback="ncnni"'),
 		manual_wordle(W, G),
-		write(G)
-	).
+		enum_print_all(G);
+	(MODE == help -> 
+		% TODO.	
+		write('=== HELP ==='), nl, nl,
+		write('This wordle solver has two modes: "auto.", and "manual."'), nl,
+		write('*Note the periods at the end of text in quotes. When entering input into this solver, a period must always end the query.'), nl, nl,
+		write('= "auto." mode: ='), nl,
+		write('The user will enter a word into the solver and the solver will print out on a new line each guess which was used in attempt to determine the word (if not determined, it will also print so after the guesses).'), nl, nl,
+		write('= "manual." mode: ='), nl,
+		write('The user will pick a word and the solver will try to guess it in six guesses.  Each guess, the user will give "feedback" on the guessed word: what letters are correct, what are in the wrong positions, what are not included, etc. Choose the "manual." mode for more details on entering feedback.'), nl, nl,
+		write('=== END OF HELP ==='), nl,
+		write('Exiting...');
+		write('Invalid mode: "'), write(MODE), write('", type "help." for help. Exiting...'), nl
+	))).
 	
 
 % Auto-wordle solver: player chooses a word `TAR`, and the program
@@ -219,108 +288,99 @@ auto_wordle(W, TAR, GUESSES) :-
 
 	% Guess 1
 	gen_guess(CANDS1, G1),
+	(TAR == G1 -> GUESSES = [G1];
 	gen_feedback(TAR, G1, I1),
 	gen_constraints(G1, I1, A1, B1, C1),
 	gen_cands(CANDS1, A1, B1, C1, CANDS2),
 
 	% Guess 2
 	gen_guess(CANDS2, G2),
+	(TAR == G2 -> GUESSES = [G1, G2];
 	gen_feedback(TAR, G2, I2),
 	gen_constraints(G2, I2, A2, B2, C2),
 	gen_cands(CANDS2, A2, B2, C2, CANDS3),
-	
+
 	% Guess 3
 	gen_guess(CANDS3, G3),
+	(TAR == G3 -> GUESSES = [G1, G2, G3];
 	gen_feedback(TAR, G3, I3),
 	gen_constraints(G3, I3, A3, B3, C3),
 	gen_cands(CANDS3, A3, B3, C3, CANDS4),
 	
 	% Guess 4
 	gen_guess(CANDS4, G4),
+	(TAR == G4 -> GUESSES = [G1, G2, G3, G4];
 	gen_feedback(TAR, G4, I4),
 	gen_constraints(G4, I4, A4, B4, C4),
 	gen_cands(CANDS4, A4, B4, C4, CANDS5),
 
 	% Guess 5
 	gen_guess(CANDS5, G5),
+	(TAR == G5 -> GUESSES = [G1, G2, G3, G4, G5];
 	gen_feedback(TAR, G5, I5),
 	gen_constraints(G5, I5, A5, B5, C5),
 	gen_cands(CANDS5, A5, B5, C5, CANDS6),
 
 	% Guess 6
 	gen_guess(CANDS6, G6),
+	(TAR == G6 -> GUESSES = [G1, G2, G3, G4, G5, G6];
+	GUESSES = [G1, G2, G3, G4, G5, G6, '=== NOT FOUND ===']
+	)))))).
 	
-	% Decide what to return  % TODO: Clean up this 
-	(G1 == TAR -> 
-		GUESSES = [G1];
-		(G2 == TAR -> 
-			GUESSES = [G1, G2];
-			(G3 == TAR -> 
-				GUESSES = [G1, G2, G3];
-				(G4 == TAR -> 
-					GUESSES = [G1, G2, G3, G4];
-					(G5 == TAR -> 
-						GUESSES = [G1, G2, G3, G4, G5];
-						(G6 == TAR -> 
-							GUESSES = [G1, G2, G3, G4, G5, G6];
-							GUESSES = [G1, G2, G3, G4, G5, G6, not_found]
-						)
-					)
-				)
-			)
-		)
-	).
-
 
 % Manual-wordle solver: player chooses a word `TAR`, and the program
 % outputs `GUESSES` used to try and guess the word.
-% Program awaits user input to validate guess info, instead of doing it itself (see auto_wordle)
+% Program awaits user input to enter guess feedback, instead of doing it itself (see auto_wordle)
 manual_wordle(W, GUESSES) :-  
-% ALERT: DOESN'T WORK DUE TO NOT BEING UPDATED YET TO REFLECT NEW METHOD STRUCTURES
 	CANDS1 = W,
 
 	% Guess 1
-	gen_guess([[c,r,a,n,e]], G1),
-	write(G1), nl,
-	read(I1),
+	gen_guess(CANDS1, G1),
+	concat_list(G1, G1_P), write('1: '), write(G1_P), write('?'), nl,
+	read(I1_C), atom_chars(I1_C, I1),
+	(I1 == [c,c,c,c,c] -> GUESSES = [G1];
 	gen_constraints(G1, I1, A1, B1, C1),
-	findall(WORD, matching_word(WORD, CANDS1, A1, B1, C1), CANDS2),
+	gen_cands(CANDS1, A1, B1, C1, CANDS2),
 
 	% Guess 2
 	gen_guess(CANDS2, G2),
-	write(G2), nl,
-	read(I2),
+	concat_list(G2, G2_P), write('2: '), write(G2_P), write('?'), nl,
+	read(I2_C), atom_chars(I2_C, I2),
+	(I2 == [c,c,c,c,c] -> GUESSES = [G1, G2];
 	gen_constraints(G2, I2, A2, B2, C2),
-	findall(WORD, matching_word(WORD, CANDS2, A2, B2, C2), CANDS3), 
+	gen_cands(CANDS2, A2, B2, C2, CANDS3),
 
 	% Guess 3
 	gen_guess(CANDS3, G3),
-	write(G3), nl,
-	read(I3),
+	concat_list(G3, G3_P), write('3: '), write(G3_P), write('?'), nl,
+	read(I3_C), atom_chars(I3_C, I3),
+	(I3 == [c,c,c,c,c] -> GUESSES = [G1, G2, G3];
 	gen_constraints(G3, I3, A3, B3, C3),
-	findall(WORD, matching_word(WORD, CANDS3, A3, B3, C3), CANDS4),
+	gen_cands(CANDS3, A3, B3, C3, CANDS4),
 	
 	% Guess 4
 	gen_guess(CANDS4, G4),
-	write(G4), nl,
-	read(I4),
+	concat_list(G4, G4_P), write('4: '), write(G4_P), write('?'), nl,
+	read(I4_C), atom_chars(I4_C, I4),
+	(I4 == [c,c,c,c,c] -> GUESSES = [G1, G2, G3, G4];
 	gen_constraints(G4, I4, A4, B4, C4),
-	findall(WORD, matching_word(WORD, CANDS4, A4, B4, C4), CANDS5),
+	gen_cands(CANDS4, A4, B4, C4, CANDS5),
 
 	% Guess 5
 	gen_guess(CANDS5, G5),
-	write(G5), nl,
-	read(I5),
+	concat_list(G5, G5_P), write('5: '), write(G5_P), write('?'), nl,
+	read(I5_C), atom_chars(I5_C, I5),
+	(I5 == [c,c,c,c,c] -> GUESSES = [G1, G2, G3, G4, G5];
 	gen_constraints(G5, I5, A5, B5, C5),
-	findall(WORD, matching_word(WORD, CANDS5, A5, B5, C5), CANDS6),
+	gen_cands(CANDS5, A5, B5, C5, CANDS6),
 
 	% Guess 6
 	gen_guess(CANDS6, G6),
-	write(G6), nl,
-	read(I6),
-	gen_constraints(G6, I6, A6, B6, C6),
-	findall(WORD, matching_word(WORD, CANDS6, A6, B6, C6), _),
+	concat_list(G6, G6_P), write('6: '), write(G6_P), write('?'), nl,
+	read(I6_C), atom_chars(I6_C, I6),
+	(I6 == [c,c,c,c,c] -> GUESSES = [G1, G2, G3, G4, G5, G6];
+	GUESSES = [G1, G2, G3, G4, G5, G6, '=== NOT FOUND ===']
+	)))))).
 
-	GUESSES = [G1, G2, G3, G4, G5, G6].
-
+% === ===
 
