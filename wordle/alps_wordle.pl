@@ -158,8 +158,17 @@ gen_cands(OLD_CANDS, A, B, C, NEW_CANDS) :-
 % Produces a word from the word set `W` which fits constraints `A`, `B`, and `C`
 % `matching_word(W, A, B, C, WORD).`
 matching_word(W, [A1, A2, A3, A4, A5], B0, [C1,C2,C3,C4,C5], R) :- 
+% Change w/ gen_cands to iterate through words and check if each satisfies; if so, add 
+% to next CANDS list (instead of using `findall` and counting dupes)
 	% In word set
 	in([A, B, C, D, E], W),
+
+	% All in contained-chars set is contained
+	del(A, B0, B1),
+	del(B, B1, B2),
+	del(C, B2, B3),
+	del(D, B3, B4),
+	del(E, B4, []),
 
 	% Set all correct variables
   (A1 \== 0 -> A = A1; A = A),
@@ -174,13 +183,6 @@ matching_word(W, [A1, A2, A3, A4, A5], B0, [C1,C2,C3,C4,C5], R) :-
 	(not_in(C, C3); C == A3),
 	(not_in(D, C4); D == A4),
 	(not_in(E, C5); E == A5),
-
-	% All in contained-chars set is contained
-	del(A, B0, B1),
-	del(B, B1, B2),
-	del(C, B2, B3),
-	del(D, B3, B4),
-	del(E, B4, []),
 
 	R = [A,B,C,D,E].
 
@@ -248,7 +250,7 @@ auto_wordle(W, TAR, GUESSES) :-
 	% Guess 6
 	gen_guess(CANDS6, G6),
 	
-	% Decide what to return
+	% Decide what to return  % TODO: Clean up this 
 	(G1 == TAR -> 
 		GUESSES = [G1];
 		(G2 == TAR -> 
