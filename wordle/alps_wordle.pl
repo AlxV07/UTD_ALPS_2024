@@ -73,6 +73,18 @@ enum_print_all(L) :- enum_print_all_h(L, 1).
 enum_print_all_h([], _).
 enum_print_all_h([H|T], I) :- write(I), write(': '), write(H), nl, I1 is I + 1, enum_print_all_h(T, I1).
 
+
+% Produces a list `R` of dupes in `W`.
+% [f,a,n,t,a] -> [a]
+% [a,h,a,h,a] -> [a,a]
+% `dupes(W, R).`
+dupes(W, R) :- dupes_h(W, W, R).
+dupes_h(_, [], []).
+dupes_h(W, [H|T], R) :-
+	del(H, W, W1),!,
+	(in(H, W1) -> R = [H|R1]; R = R1),
+	dupes_h(W1, T, R1).
+
 % === ===
 
 
@@ -173,7 +185,8 @@ gen_B_constraints([G_H|G_T], [F_H|F_T], B) :-
 % `gen_C_constraints(GUESS, FEEDBACK, C)`.
 gen_C_constraints(G, F, C) :- 
 	singular_non_contained(G, F, S),
-	global_non_contained(G, F, L),
+	dupes(G, D),
+	global_non_contained(G, F, L, D),
 	add_all_to_all(S, L, C).
 
 % Produces a list `L`, of singularly non-contained letters i.e. not in the cur pos in the word.
@@ -184,11 +197,13 @@ singular_non_contained([G_H|G_T], [F_H|F_T], S) :-
 	singular_non_contained(G_T, F_T, L).
 
 % Produces a list `L`, of globally non-contained letters i.e. not in any pos in the word.
-% `global_non_contained(GUESS, FEEDBACK, L).`
-global_non_contained([], [], []).
-global_non_contained([G_H|G_T], [F_H|F_T], G) :-
-	(F_H == n -> G = [G_H|L]; G = L),
-	global_non_contained(G_T, F_T, L).
+% `global_non_contained(GUESS, FEEDBACK, L, DUPES).`
+global_non_contained([], [], [], _).
+global_non_contained([G_H|G_T], [F_H|F_T], G, D) :-
+	(F_H == n ->
+		del(G_H, D, D1), (D == D1 -> G = [G_H|L]; G = L);
+		G = L, D1 = D),
+	global_non_contained(G_T, F_T, L, D1).  
 
 % === ===
 
@@ -234,7 +249,11 @@ matching_word([A,B,C,D,E], [A1, A2, A3, A4, A5], B0, [C1,C2,C3,C4,C5]) :-
 % Produces a `GUESS` from the `CANDS` list
 % `gen_guess(CANDS, GUESS)`
 gen_guess([], [0,0,0,0,0]).  % If reaches this, either unfound bug or TAR word not in word set.
-gen_guess([H|_], H).
+gen_guess(L, G) :-
+	L \== [],
+	length(L, LEN), L1 is LEN - 1,
+	random_between(0, L1, B),
+	nth0(B, L, G).
 
 % === ===
 
@@ -256,13 +275,13 @@ wordle :-
 		write('=== "manual." mode selected ==='), nl,
 		write('For each guess from the solver, enter feedback in the format:'), nl,
 		write('-Letter is correct? ->                       c'), nl,
-		write('-Letter in word and NOT already marked*? -> i'), nl,
+		write('-Letter in word and NOT already marked*? ->  i'), nl,
 		write('-Letter is not in word? ->                   n'), nl,
 		write('* i.e. Word="ab", Guess="aa" -> '), nl,
 		write('*      Feedback="cn", not "ci", because first "a" already marked by "c".'), nl, nl,
-		write('e.x. Word="trees",'),
-		write('    Guess="crane" ->'),
-		write(' Feedback="ncnni"'),
+		write('e.x. Word="trees",'), nl,
+		write('    Guess="crane" ->'), nl,
+		write(' Feedback="ncnni."'), nl, nl,
 		manual_wordle(W, G),
 		enum_print_all(G);
 	(MODE == help -> 
@@ -292,6 +311,8 @@ auto_wordle(W, TAR, GUESSES) :-
 	gen_feedback(TAR, G1, I1),
 	gen_constraints(G1, I1, A1, B1, C1),
 	gen_cands(CANDS1, A1, B1, C1, CANDS2),
+
+	% ===
 
 	% Guess 2
 	gen_guess(CANDS2, G2),
